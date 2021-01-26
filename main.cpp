@@ -3,8 +3,6 @@
 #include <tchar.h>
 #include <stdio.h>
 
-#pragma comment(lib, "wbemuuid.lib")
-
 #define ABORT(msg)	\
 	do {printf("ABORT : %s\n", msg); exit(EXIT_FAILURE);} while(0)
 
