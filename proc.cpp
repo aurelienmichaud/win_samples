@@ -6,9 +6,9 @@
 #define ABORT(msg)	\
 	do {printf("ABORT : %s\n", msg); exit(EXIT_FAILURE);} while(0)
 
-#define PROCESS_ARRAY_SIZE		2048
+#define PROCESS_ARRAY_SIZE	2048
 #define PROCESS_FILENAME_SIZE	512
-#define MODULE_ARRAY_SIZE		256
+#define MODULE_ARRAY_SIZE	256
 #define MODULE_FILENAME_SIZE	512
 
 void print_process_cmdline(DWORD process_id)
@@ -26,7 +26,7 @@ void print_process_properties(DWORD process_id)
 	DWORD process_module_array_size;
 	TCHAR process_name[PROCESS_FILENAME_SIZE];
 	TCHAR module_name[MODULE_FILENAME_SIZE];
-	
+
 	if (NULL == (hp = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, process_id))) {
 		/*printf("[!] Failed to open a handle on the process (id:%d)\n", process_id);*/
 		return;
@@ -51,11 +51,10 @@ void print_process_properties(DWORD process_id)
 	for (i = 0; i < (process_module_array_size / sizeof(*process_module_array)); i++) {
 		/* Get the DLL's name */
 		if (GetModuleFileName(process_module_array[i], module_name, MODULE_FILENAME_SIZE / sizeof(TCHAR)) == 0) {
+			_tprintf(TEXT("\t'%s'\n"), module_name);
+		} else {
 			/*printf("\tFailed to fetch the DLL(%3d)'s name of process (id:%d)\n", i, process_id);*/
-			continue;
 		}
-
-		_tprintf(TEXT("\t'%s'\n"), module_name);
 	}
 
 	CloseHandle(hp);
