@@ -15,11 +15,12 @@
 #define MODULE_ARRAY_SIZE	256
 #define MODULE_FILENAME_SIZE	512
 
-#define ERRO_OPEN_PROCESS		(-1)
-#define ERRO_MALLOC				(-2)
+#define ERRO_OPEN_PROCESS	(-1)
+#define ERRO_MALLOC		(-2)
 
 #define WARN_NO_PROCESS_NAME	(1 << 0)
 #define WARN_NO_MODULE_ARRAY	(1 << 1)
+#define WARN_NO_COMMAND_LINE	(1 << 2)
 
 struct process_properties {
 	DWORD		pid;
@@ -30,43 +31,63 @@ struct process_properties {
 	DWORD		process_module_array_size;
 };
 
-typedef NTSTATUS (NTAPI* _NtQueryInformationProcess)(
-	HANDLE ProcessHandle,
-	DWORD ProcessInformationClass,
-	PVOID ProcessInformation,
-	DWORD ProcessInformationLength,
-	PDWORD ReturnLength
-	);
-
-TCHAR *fetch_cmd_line(HANDLE hp)
+TCHAR* fetch_cmd_line(HANDLE hp)
 {
 	TCHAR* tchar_cmdline;
 	PROCESS_BASIC_INFORMATION pbi;
-	RTL_USER_PROCESS_PARAMETERS *params_structure_addr;
+	RTL_USER_PROCESS_PARAMETERS* params_structure_addr;
 	UNICODE_STRING cmdline;
 
-	_NtQueryInformationProcess NtQueryInformationProcess =
-		(_NtQueryInformationProcess)GetProcAddress(
-			/*GetModuleHandleA("C:\\Windows\\SYSTEM32\\ntdll.dll"), "NtQueryInformationProcess");*/
-			GetModuleHandleA("ntdll.dll"), "NtQueryInformationProcess");
+	if (NULL == hp)
+		return NULL;
 
-	NtQueryInformationProcess(	hp,
-								ProcessBasicInformation,
-								&pbi,
-								sizeof(pbi),
-								NULL);
+	/* In order to fetch the command line string, we first need to fetch the Process Basic Information
+	 * structure (PBI), located inside the process inside the process' memory. The command line string pointer
+	 * is well hidden and we need to go through a couple of structures inside the process' memory to get to it.
+	 * We follow this scheme :
+	 *
+	 *		PBI -> PEB -> Process Parameters -> CommandLine
+	 */
 
-	if (ReadProcessMemory(hp,
-		&(pbi.PebBaseAddress->ProcessParameters),
-		&params_structure_addr,
-		sizeof(params_structure_addr), NULL) == 0)
+	/* Load ntdll in order to use NtQueryInformationProcess function, since it should not be called directly. */
+	{
+		/* Only for the following instruction */
+		typedef NTSTATUS (NTAPI* _NtQueryInformationProcess)(
+			HANDLE ProcessHandle,
+			DWORD ProcessInformationClass,
+			PVOID ProcessInformation,
+			DWORD ProcessInformationLength,
+			PDWORD ReturnLength
+		);
+
+		_NtQueryInformationProcess NtQueryInformationProcess =
+			(_NtQueryInformationProcess)GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtQueryInformationProcess");
+
+		/* Fetch the process' Process Basic Information (pbi) structure. */
+		NtQueryInformationProcess(	hp,
+						ProcessBasicInformation,
+						&pbi,
+						sizeof(pbi),
+						NULL);
+	}
+
+	/* The PBI contains the address of a PEB structure which in turn,
+	 * containes the address of the Process Parameters structure. */
+	if (0 == ReadProcessMemory(	hp,
+					&(pbi.PebBaseAddress->ProcessParameters),
+					&params_structure_addr,
+					sizeof(params_structure_addr),
+					NULL))
 	{
 		return NULL;
 	}
 
-	if (ReadProcessMemory(hp,
-		&(((_RTL_USER_PROCESS_PARAMETERS*)params_structure_addr)->CommandLine),
-		&cmdline, sizeof(cmdline), NULL) == 0)
+	/* The Process Parameters structure contains the address of the command line string. */
+	if (0 == ReadProcessMemory(	hp,
+					&(params_structure_addr->CommandLine),
+					&cmdline,
+					sizeof(cmdline),
+					NULL))
 	{
 		return NULL;
 	}
@@ -76,11 +97,10 @@ TCHAR *fetch_cmd_line(HANDLE hp)
 	if (NULL == tchar_cmdline)
 		return NULL;
 
-	if (ReadProcessMemory(hp, cmdline.Buffer,
-		tchar_cmdline, cmdline.Length, NULL) == 0)
-	{
+	/* Eventually, we are able to copy the command line string from the process' memory inside
+	 * our own buffer. */
+	if (0 == ReadProcessMemory(hp, cmdline.Buffer, tchar_cmdline, cmdline.Length, NULL))
 		return NULL;
-	}
 
 	return tchar_cmdline;
 }
@@ -144,11 +164,10 @@ int get_process_properties(DWORD process_id, struct process_properties *pp)
 	}
 	else {
 		pp->name = (TCHAR*)malloc((length + 1) * sizeof(*(pp->name)));
-		if (NULL != pp->name) {
+		if (NULL != pp->name)
 			memcpy(pp->name, process_name, (length + 1) * sizeof(*(pp->name)));
-		} else {
+		else
 			return ERRO_MALLOC;
-		}
 	}
 
 	if (pp->command_line != NULL) {
@@ -156,7 +175,8 @@ int get_process_properties(DWORD process_id, struct process_properties *pp)
 		pp->command_line = NULL;
 	}
 
-	pp->command_line = fetch_cmd_line(pp->handle);
+	if (NULL == (pp->command_line = fetch_cmd_line(pp->handle)))
+		ret_value |= WARN_NO_COMMAND_LINE;
 
 	return ret_value;
 }
@@ -198,7 +218,6 @@ void print_process_properties(struct process_properties *pp)
 void display_all_processes()
 {
 	unsigned int i;
-	int ret;
 	DWORD process_id_array[PROCESS_ARRAY_SIZE];
 	DWORD process_id_array_size;
 	struct process_properties pp = { 0 };
@@ -212,6 +231,7 @@ void display_all_processes()
 		switch (get_process_properties(process_id_array[i], &pp)) {
 			case ERRO_OPEN_PROCESS:
 				break;
+			case ERRO_MALLOC:
 			default:
 				print_process_properties(&pp);
 				printf("\n\n");
