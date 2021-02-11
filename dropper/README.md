@@ -1,5 +1,13 @@
 # Dropper
 
+## How to
+
+In order to make a final EXE, you need :
+* To compile the downloader.cpp into Malware1.exe
+* Launch the Python script make_dropper.py in order to store a xored version of the Malware1.exe into a new source code (dropper.cpp)
+* Compile the dropper.cpp
+* The final executable (compiled version of dropper.cpp) can be executed independantly
+
 ## dowloader.cpp
 This is the final source code that we want to be executed. This source code :
 * Downloads a remote file
